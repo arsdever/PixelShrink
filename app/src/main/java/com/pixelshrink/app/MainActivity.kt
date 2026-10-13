@@ -26,8 +26,20 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import coil.compose.AsyncImage
 class MainActivity : ComponentActivity() {
+    companion object {
+        init {
+            System.loadLibrary("pixel_shrink_jni")
+        }
+    }
+
+    private external fun nativeClampQuality(quality: Int): Int
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        val result = nativeClampQuality(140)
+        android.util.Log.i("PixelShrink", "Native clamp returned $result")
+
         setContent {
             PixelShrinkTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
