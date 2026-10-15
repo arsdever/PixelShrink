@@ -1,12 +1,17 @@
 package com.pixelshrink.app
 
+import android.content.ContentResolver
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -24,7 +29,13 @@ import androidx.compose.ui.unit.dp
 import com.pixelshrink.app.ui.theme.PixelShrinkTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import coil.compose.AsyncImage
+import java.nio.ByteBuffer
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.get
+
 class MainActivity : ComponentActivity() {
     companion object {
         init {
@@ -32,18 +43,53 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private external fun nativeClampQuality(quality: Int): Int
+    private external fun nativeClampQuality(buffer:ByteBuffer): Int
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val result = nativeClampQuality(140)
-        android.util.Log.i("PixelShrink", "Native clamp returned $result")
+        val processImageCallback: (Uri) -> Bitmap = { uri: Uri ->
+            val resolver: ContentResolver = contentResolver
+            val imageBytes = resolver.openInputStream(uri)?.use { stream ->
+                stream.readBytes()
+            }
+
+            if (imageBytes == null) {
+                Log.w("imgproc", "No image bytes available")
+                Bitmap.createBitmap(1,1,Bitmap.Config.ARGB_8888)
+            } else {
+                val bitmap: Bitmap? = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+                if (bitmap == null || bitmap.byteCount == 0) {
+                    Log.w("imgproc", "Bitmap was empty")
+                    Bitmap.createBitmap(1,1,Bitmap.Config.ARGB_8888)
+                }
+
+                val byteBuffer = ByteBuffer.allocateDirect(bitmap!!.byteCount)
+                bitmap.copyPixelsToBuffer(byteBuffer)
+                Log.i("imgproc", "Creating the image")
+                Log.i("imgproc", "Bitmap config: $bitmap.config")
+                val modifiedBitmap: Bitmap = createBitmap(
+                    bitmap.width,
+                    bitmap.height,
+                    bitmap.config ?: Bitmap.Config.ARGB_8888
+                )
+
+                byteBuffer.rewind()
+                val processed = nativeClampQuality(byteBuffer)
+                val color = bitmap.get(0,0)
+                Log.i("imgproc", "Processed $processed, First pixel is $color")
+
+                byteBuffer.rewind()
+                modifiedBitmap.copyPixelsFromBuffer(byteBuffer)
+
+                modifiedBitmap
+            }
+        }
 
         setContent {
             PixelShrinkTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    HomeScreen()
+                    HomeScreen(processImageCallback)
                 }
             }
         }
@@ -51,7 +97,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun HomeScreen() {
+private fun HomeScreen(onProcessImage: (Uri)->Bitmap) {
     var message by remember { mutableStateOf("Choose a photo to resize or compress") };
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
@@ -69,9 +115,10 @@ private fun HomeScreen() {
             Text("Choose the image...", style = MaterialTheme.typography.bodyLarge )
         }
         result.value?.let { uri ->
-            AsyncImage(
-                model = uri,
-                contentDescription = ""
+            val bmp: ImageBitmap = onProcessImage(uri).asImageBitmap()
+            Image(
+                bitmap = bmp,
+                contentDescription = "Modified image"
             )
             Text("Image at $uri has been chosen", style = MaterialTheme.typography.bodyLarge)
         }
