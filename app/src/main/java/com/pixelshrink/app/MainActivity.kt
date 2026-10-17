@@ -1,6 +1,5 @@
 package com.pixelshrink.app
 
-import android.content.ContentResolver
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -31,10 +30,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
-import coil.compose.AsyncImage
 import java.nio.ByteBuffer
-import androidx.core.graphics.createBitmap
-import androidx.core.graphics.get
 
 class MainActivity : ComponentActivity() {
     companion object {
@@ -43,46 +39,53 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private external fun nativeClampQuality(buffer:ByteBuffer): Int
+    private external fun nativeProcessImage(
+        rgbPixels: ByteArray,
+        width: Int,
+        height: Int,
+        quality: Int,
+    ): ByteArray?
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val processImageCallback: (Uri) -> Bitmap = { uri: Uri ->
-            val resolver: ContentResolver = contentResolver
-            val imageBytes = resolver.openInputStream(uri)?.use { stream ->
-                stream.readBytes()
-            }
+        val processImageCallback: (Uri) -> Bitmap? = { uri: Uri ->
+            val imageBytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
 
-            if (imageBytes == null) {
+            if (imageBytes == null || imageBytes.isEmpty()) {
                 Log.w("imgproc", "No image bytes available")
-                Bitmap.createBitmap(1,1,Bitmap.Config.ARGB_8888)
+                null
             } else {
-                val bitmap: Bitmap? = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-                if (bitmap == null || bitmap.byteCount == 0) {
-                    Log.w("imgproc", "Bitmap was empty")
-                    Bitmap.createBitmap(1,1,Bitmap.Config.ARGB_8888)
+                val sourceBitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+                if (sourceBitmap == null) {
+                    Log.w("imgproc", "Could not decode the selected image")
+                    null
+                } else {
+                    val width = sourceBitmap.width
+                    val height = sourceBitmap.height
+                    val argbPixels = IntArray(width * height)
+                    sourceBitmap.getPixels(argbPixels, 0, width, 0, 0, width, height)
+
+                    val rgbPixels = ByteArray(argbPixels.size * 3)
+                    argbPixels.forEachIndexed { index, color ->
+                        val offset = index * 3
+                        rgbPixels[offset] = ((color shr 16) and 0xFF).toByte()
+                        rgbPixels[offset + 1] = ((color shr 8) and 0xFF).toByte()
+                        rgbPixels[offset + 2] = (color and 0xFF).toByte()
+                    }
+
+                    val processedBytes = try {
+                        nativeProcessImage(rgbPixels, width, height, 85)
+                    } catch (error: RuntimeException) {
+                        Log.e("imgproc", "Native image processing failed", error)
+                        null
+                    }
+                    if (processedBytes == null) {
+                        null
+                    } else {
+                        BitmapFactory.decodeByteArray(processedBytes, 0, processedBytes.size)
+                    }
                 }
-
-                val byteBuffer = ByteBuffer.allocateDirect(bitmap!!.byteCount)
-                bitmap.copyPixelsToBuffer(byteBuffer)
-                Log.i("imgproc", "Creating the image")
-                Log.i("imgproc", "Bitmap config: $bitmap.config")
-                val modifiedBitmap: Bitmap = createBitmap(
-                    bitmap.width,
-                    bitmap.height,
-                    bitmap.config ?: Bitmap.Config.ARGB_8888
-                )
-
-                byteBuffer.rewind()
-                val processed = nativeClampQuality(byteBuffer)
-                val color = bitmap.get(0,0)
-                Log.i("imgproc", "Processed $processed, First pixel is $color")
-
-                byteBuffer.rewind()
-                modifiedBitmap.copyPixelsFromBuffer(byteBuffer)
-
-                modifiedBitmap
             }
         }
 
@@ -97,7 +100,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun HomeScreen(onProcessImage: (Uri)->Bitmap) {
+private fun HomeScreen(onProcessImage: (Uri) -> Bitmap?) {
     var message by remember { mutableStateOf("Choose a photo to resize or compress") };
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
@@ -115,11 +118,13 @@ private fun HomeScreen(onProcessImage: (Uri)->Bitmap) {
             Text("Choose the image...", style = MaterialTheme.typography.bodyLarge )
         }
         result.value?.let { uri ->
-            val bmp: ImageBitmap = onProcessImage(uri).asImageBitmap()
-            Image(
-                bitmap = bmp,
-                contentDescription = "Modified image"
-            )
+            val processedBitmap = onProcessImage(uri)
+            if (processedBitmap == null) {
+                Text("Could not process the selected image", style = MaterialTheme.typography.bodyLarge)
+            } else {
+                val imageBitmap: ImageBitmap = processedBitmap.asImageBitmap()
+                Image(bitmap = imageBitmap, contentDescription = "Modified image")
+            }
             Text("Image at $uri has been chosen", style = MaterialTheme.typography.bodyLarge)
         }
     }
