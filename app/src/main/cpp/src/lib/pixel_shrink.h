@@ -5,7 +5,7 @@
 #include <span>
 #include <vector>
 
-namespace pixel_shrink
+namespace ps
 {
 
 using Byte = std::uint8_t;

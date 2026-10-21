@@ -11,7 +11,7 @@
 
 #include <jpeglib.h>
 
-namespace pixel_shrink
+namespace ps
 {
 namespace
 {

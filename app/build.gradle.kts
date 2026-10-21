@@ -5,7 +5,7 @@ plugins {
 
 tasks.register("conanInstall") {
     val conanExecutable = "conan"
-    val conanFile = layout.projectDirectory.file("src/main/cpp/conanfile.txt")
+    val conanFile = layout.projectDirectory.file("src/main/cpp/conanfile.py")
     val conanHome = System.getenv("CONAN_HOME")
         ?: "${System.getProperty("user.home")}/.conan2"
     val conanProfile = file("$conanHome/profiles/android-studio")
@@ -37,6 +37,7 @@ tasks.register("conanInstall") {
                     conanExecutable,
                     "install", conanFile.asFile.absolutePath,
                     "--profile", conanProfile.absolutePath,
+                    "-o", "with_tests=False",
                     "-s", "build_type=$buildType",
                     "-s", "arch=$arch",
                     "--build", "missing",
