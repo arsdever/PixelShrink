@@ -6,7 +6,7 @@ class PixelShrinkConan(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
     options = {"with_tests": [True, False]}
     default_options = {"with_tests": False}
-    requires = "libjpeg-turbo/3.2.0"
+    requires = ["libjpeg-turbo/3.2.0", "pybind11/3.0.1"]
     generators = "CMakeDeps", "CMakeToolchain"
 
     def build_requirements(self):
